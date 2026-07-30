@@ -1,0 +1,123 @@
+name: ColorsMine palette check
+description: Fail the build when your design tokens are not accessible — WCAG 2.2, APCA and color-blindness grading.
+author: ColorsMine
+branding:
+  icon: droplet
+  color: purple
+
+inputs:
+  files:
+    description: Token files to grade, space separated. Leave empty to auto-discover.
+    required: false
+    default: ''
+  colors:
+    description: Grade these colors instead of reading files, e.g. "#fff #6b7280 #2563eb #111827".
+    required: false
+    default: ''
+  min:
+    description: Minimum grade to pass — S, A, B, C or D.
+    required: false
+    default: 'B'
+  wcag:
+    description: Fail if any intended pairing misses its WCAG minimum, whatever the grade says.
+    required: false
+    default: 'false'
+  dark:
+    description: Apply min and wcag to dark mode too.
+    required: false
+    default: 'false'
+  version:
+    description: Version of the colorsmine package to run.
+    required: false
+    default: 'latest'
+
+outputs:
+  passed:
+    description: '"true" when the palette meets the minimum.'
+    value: ${{ steps.check.outputs.passed }}
+  grade:
+    description: Light-mode grade — S, A, B, C or D.
+    value: ${{ steps.check.outputs.grade }}
+  score:
+    description: Light-mode score out of 100.
+    value: ${{ steps.check.outputs.score }}
+  dark-grade:
+    description: Dark-mode grade.
+    value: ${{ steps.check.outputs.dark-grade }}
+  dark-score:
+    description: Dark-mode score out of 100.
+    value: ${{ steps.check.outputs.dark-score }}
+  badge:
+    description: URL of the shields-style badge for this palette.
+    value: ${{ steps.check.outputs.badge }}
+
+runs:
+  using: composite
+  steps:
+    - id: check
+      shell: bash
+      env:
+        CM_FILES: ${{ inputs.files }}
+        CM_COLORS: ${{ inputs.colors }}
+        CM_MIN: ${{ inputs.min }}
+        CM_WCAG: ${{ inputs.wcag }}
+        CM_DARK: ${{ inputs.dark }}
+        CM_VERSION: ${{ inputs.version }}
+      run: |
+        set -uo pipefail
+
+        args=(check --min "$CM_MIN")
+        [ "$CM_WCAG" = "true" ] && args+=(--wcag)
+        [ "$CM_DARK" = "true" ] && args+=(--dark)
+        if [ -n "$CM_COLORS" ]; then
+          args+=(--colors "$CM_COLORS")
+        elif [ -n "$CM_FILES" ]; then
+          # shellcheck disable=SC2206
+          extra=($CM_FILES)
+          args+=("${extra[@]}")
+        fi
+
+        # The log gets the human report; the outputs and the job summary come
+        # from the same run's JSON, so they can never disagree.
+        npx --yes "colorsmine@$CM_VERSION" "${args[@]}" --json > "$RUNNER_TEMP/colorsmine.json"
+        code=$?
+        if [ ! -s "$RUNNER_TEMP/colorsmine.json" ]; then
+          echo "::error title=ColorsMine::could not read any palette — see the log above"
+          exit 2
+        fi
+        FORCE_COLOR=1 npx --yes "colorsmine@$CM_VERSION" "${args[@]}" --color || true
+
+        node -e '
+          const fs = require("fs")
+          const r = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/colorsmine.json", "utf8"))
+          const out = fs.createWriteStream(process.env.GITHUB_OUTPUT, { flags: "a" })
+          out.write(`passed=${r.passed}\ngrade=${r.grade}\nscore=${r.overall}\n`)
+          out.write(`dark-grade=${r.dark.grade}\ndark-score=${r.dark.overall}\nbadge=${r.badge}\n`)
+          out.end()
+
+          const sum = fs.createWriteStream(process.env.GITHUB_STEP_SUMMARY, { flags: "a" })
+          const icon = r.passed ? "✅" : "❌"
+          sum.write(`## ${icon} Palette ${r.grade} — ${r.overall}/100\n\n`)
+          sum.write(`Dark mode: **${r.dark.grade}** ${r.dark.overall}/100 · minimum **${r.min}**`)
+          sum.write(r.enforcedDark ? " (dark enforced)\n\n" : "\n\n")
+          sum.write(`| Token | Hex | Read from |\n|---|---|---|\n`)
+          for (const p of r.palette) {
+            sum.write(`| \`${p.token}\` | \`${p.hex.toUpperCase()}\` | ${p.source} |\n`)
+          }
+          sum.write(`\n| Pairing | Ratio | Required | APCA | |\n|---|---|---|---|---|\n`)
+          for (const p of r.pairings) {
+            sum.write(`| ${p.label} | ${p.ratio}:1 | ${p.required}:1 | Lc ${Math.abs(p.apca)} | ${p.passes ? "✅" : "❌"} |\n`)
+          }
+          if (r.fix) {
+            sum.write(`\n**One change away** — \`${r.fix.from}\` → \`${r.fix.to}\` (${r.fix.move}) lifts `)
+            sum.write(`${r.fix.gradeBefore} ${r.fix.overallBefore} to ${r.fix.gradeAfter} ${r.fix.overallAfter}.\n`)
+          }
+          for (const n of r.notes) sum.write(`\n> ${n}\n`)
+          if (!r.passed) {
+            sum.write(`\n${r.reasons.map(x => `> ❌ ${x}`).join("\n>\n")}\n`)
+            for (const reason of r.reasons) console.log(`::error title=ColorsMine::${reason}`)
+          }
+          sum.write(`\n[Full report](https://colorsmine.com/rate/${r.badge.split("/").pop().replace(".svg","")})\n`)
+          sum.end()
+        '
+        exit $code

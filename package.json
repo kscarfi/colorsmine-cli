@@ -1,0 +1,57 @@
+{
+  "name": "colorsmine",
+  "version": "0.1.1",
+  "description": "Fail your build when your color palette isn't accessible. WCAG 2.2 + APCA + color-blindness grading for your design tokens.",
+  "type": "module",
+  "bin": {
+    "colorsmine": "dist/colorsmine.mjs"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "vite build",
+    "test": "vitest run",
+    "check": "node dist/colorsmine.mjs check",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "keywords": [
+    "accessibility",
+    "a11y",
+    "wcag",
+    "apca",
+    "contrast",
+    "color",
+    "palette",
+    "design-tokens",
+    "design-system",
+    "tailwind",
+    "shadcn",
+    "oklch",
+    "ci",
+    "color-blindness",
+    "dark-mode"
+  ],
+  "homepage": "https://colorsmine.com",
+  "bugs": "https://github.com/kscarfi/colorsmine-cli/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kscarfi/colorsmine-cli.git"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "color2k": "^2.0.3",
+    "culori": "^4.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}

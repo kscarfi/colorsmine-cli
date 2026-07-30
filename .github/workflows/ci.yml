@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm test
+      - run: npm run build
+
+      # The package promises a specific exit code; prove it rather than assume
+      # it. A palette with a failing pairing must exit 1 under --wcag and 0
+      # without it, or the gate is decorative.
+      - name: Exit codes
+        run: |
+          set -e
+          node dist/colorsmine.mjs check --colors "#FFFFFF #F3F4F6 #6B7280 #2563EB #111827" --min B
+          ! node dist/colorsmine.mjs check --colors "#808080 #828282 #7e7e7e" --min B
+          ! node dist/colorsmine.mjs check --colors "#FFFFFF #9AA7B4 #2563EB #020817" --wcag
+          node dist/colorsmine.mjs check --colors "#FFFFFF #9AA7B4 #2563EB #020817" --min B
+
+      # A tarball that builds is not a tarball that installs. Pack it, install
+      # it into an empty project, and run the published binary.
+      - name: Install from tarball
+        run: |
+          set -e
+          npm pack
+          mkdir -p /tmp/consumer/src && cd /tmp/consumer
+          printf ':root{--background:#fff;--muted-foreground:#6b7280;--primary:#2563eb;--foreground:#111827}' > src/globals.css
+          npm init -y > /dev/null
+          npm i "$GITHUB_WORKSPACE"/colorsmine-*.tgz
+          npx colorsmine check --min B --wcag
+
+  action:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Dogfooding: the action in this repo, run against this repo.
+      - uses: ./
+        id: palette
+        with:
+          colors: '#FFFFFF #F3F4F6 #6B7280 #2563EB #111827'
+          min: B
+          wcag: 'true'
+      - name: Outputs are populated
+        run: |
+          set -e
+          test "${{ steps.palette.outputs.passed }}" = "true"
+          test -n "${{ steps.palette.outputs.grade }}"
+          test -n "${{ steps.palette.outputs.badge }}"
+          echo "grade=${{ steps.palette.outputs.grade }} score=${{ steps.palette.outputs.score }}"
