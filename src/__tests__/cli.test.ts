@@ -4,6 +4,10 @@ import { readCss } from '../readers/css'
 import { readJson } from '../readers/json'
 import { readTailwind } from '../readers/tailwind'
 import { selectPalette } from '../select'
+import { readAll } from '../discover'
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 describe('toHex', () => {
   it('normalizes every notation a token file uses', () => {
@@ -225,5 +229,80 @@ describe('selectPalette', () => {
     ])
     expect(new Set(sel.hexes).size).toBe(sel.hexes.length)
     expect(sel.picks.some(p => p.role === 'card')).toBe(false)
+  })
+})
+
+describe('dark theme detection', () => {
+  const light = ':root{--background:#fff;--muted-foreground:#6b7280;--primary:#2563eb;--foreground:#111827}'
+  const darkDecls = '--background:#0a0a0a;--foreground:#fafafa;--muted-foreground:#a1a1aa'
+
+  it('recognises the class wherever it sits in the selector', () => {
+    // `html.dark` and `:root.dark` are as common as a bare `.dark`. Anchoring
+    // on whitespace missed them and reported a modelled dark mode instead.
+    for (const sel of ['.dark', 'html.dark', ':root.dark', 'body.dark-mode', '.theme-dark', 'html[data-theme="dark"]', '[data-mode=dark]']) {
+      const { dark } = readCss(`${light}\n${sel}{${darkDecls}}`, 'g.css')
+      expect(dark.find(t => t.name === '--background')?.hex, sel).toBe('#0a0a0a')
+    }
+  })
+
+  it('does not mistake a longer word for the dark class', () => {
+    const { dark, light: l } = readCss(`${light}\n.darkroom{--background:#0a0a0a}`, 'g.css')
+    expect(dark).toHaveLength(0)
+    expect(l.find(t => t.name === '--background')!.hex).toBe('#ffffff')
+  })
+
+  it('reads @media (prefers-color-scheme: dark)', () => {
+    // The block matcher only sees innermost braces, so without lifting the
+    // at-rule this `:root` looked like an ordinary light rule.
+    const css = `${light}\n@media (prefers-color-scheme: dark){:root{${darkDecls}}}`
+    const { dark, light: l } = readCss(css, 'g.css')
+    expect(dark.find(t => t.name === '--background')!.hex).toBe('#0a0a0a')
+    expect(l.find(t => t.name === '--background')!.hex).toBe('#ffffff')
+  })
+
+  it('survives nesting and other at-rules', () => {
+    const css = `
+      @layer base { ${light} }
+      @supports (color: oklch(0 0 0)) {
+        @media (prefers-color-scheme: dark) { :root { ${darkDecls} } }
+      }
+      @media (min-width: 40rem) { :root { --primary: #1d4ed8 } }
+    `
+    const { dark, light: l } = readCss(css, 'g.css')
+    expect(dark.find(t => t.name === '--background')!.hex).toBe('#0a0a0a')
+    expect(l.find(t => t.name === '--background')!.hex).toBe('#ffffff')
+    // a non-dark media query stays in the light set
+    expect(l.find(t => t.name === '--primary')!.hex).toBe('#2563eb')
+  })
+
+  it('keeps a light-scheme media query out of the dark set', () => {
+    const css = `${light}\n@media (prefers-color-scheme: light){:root{--primary:#1d4ed8}}`
+    expect(readCss(css, 'g.css').dark).toHaveLength(0)
+  })
+})
+
+describe('directory arguments', () => {
+  // `colorsmine check src/` is a reasonable thing to type; before this it
+  // surfaced Node's raw `EISDIR` at the user.
+  const root = mkdtempSync(join(tmpdir(), 'cm-'))
+  mkdirSync(join(root, 'src'))
+  writeFileSync(join(root, 'src', 'globals.css'), ':root{--background:#fff;--foreground:#111827}')
+  mkdirSync(join(root, 'empty'))
+
+  it('looks inside a directory by file name', async () => {
+    const r = await readAll([join(root, 'src')], root)
+    expect(r.files).toEqual(['src/globals.css'])
+    expect(r.tokens).toHaveLength(2)
+  })
+
+  it('treats a project root like a bare check', async () => {
+    const r = await readAll([root], root)
+    expect(r.files).toEqual(['src/globals.css'])
+  })
+
+  it('says so when a directory holds nothing gradeable', async () => {
+    const r = await readAll([join(root, 'empty')], root)
+    expect(r.tokens).toHaveLength(0)
+    expect(r.notes.join(' ')).toMatch(/no token file/)
   })
 })

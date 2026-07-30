@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
 import { resolve, relative, extname, basename } from 'node:path'
 import type { Token } from './color'
 import { readCss } from './readers/css'
@@ -45,6 +45,30 @@ export async function readAll(files: string[], cwd: string): Promise<ReadResult>
   for (const file of files) {
     if (!existsSync(file)) {
       notes.push(`${relative(cwd, file)}: no such file`)
+      continue
+    }
+    // `colorsmine check src/` is a reasonable thing to type. Look for the
+    // usual token files inside rather than letting readFile throw EISDIR at
+    // the user with a stack-trace-shaped message.
+    if (statSync(file).isDirectory()) {
+      // CANDIDATES are paths relative to the project root, so joining them
+      // onto a directory would look for src/src/globals.css. Inside a
+      // directory it is the file names that matter.
+      // Both forms: the relative paths make `check .` behave like a bare
+      // `check`, the bare names make `check src/` find src/globals.css.
+      const names = [...new Set([...CANDIDATES, ...CANDIDATES.map(c => basename(c))])]
+      const inside = names
+        .map(n => resolve(file, n))
+        .filter(p => existsSync(p) && !statSync(p).isDirectory())
+      if (!inside.length) {
+        notes.push(`${relative(cwd, file) || '.'}: a directory with no token file in it`)
+        continue
+      }
+      const nested = await readAll(inside, cwd)
+      tokens.push(...nested.tokens)
+      darkTokens.push(...nested.darkTokens)
+      notes.push(...nested.notes)
+      used.push(...nested.files)
       continue
     }
     const text = await readFile(file, 'utf8')
