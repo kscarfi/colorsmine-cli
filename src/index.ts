@@ -9,7 +9,8 @@ import { splitColors, toHex } from './color'
 /** The dark grade, plus whether it came from the project or from the engine. */
 type DarkResult = PaletteRating['dark'] & { declared: boolean }
 
-const VERSION = '0.1.0'
+declare const __VERSION__: string
+const VERSION = __VERSION__
 const ORDER: Grade[] = ['D', 'C', 'B', 'A', 'S']
 
 const HELP = `

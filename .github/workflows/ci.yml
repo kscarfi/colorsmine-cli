@@ -63,3 +63,21 @@ jobs:
           test -n "${{ steps.palette.outputs.grade }}"
           test -n "${{ steps.palette.outputs.badge }}"
           echo "grade=${{ steps.palette.outputs.grade }} score=${{ steps.palette.outputs.score }}"
+
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci && npm run build
+      # 0.1.1 shipped reporting `0.1.0` because the version was a hand-written
+      # constant. It is injected from package.json now; this proves it stayed
+      # injected.
+      - name: --version matches package.json
+        run: |
+          set -e
+          pkg=$(node -p "require('./package.json').version")
+          bin=$(node dist/colorsmine.mjs --version)
+          echo "package.json=$pkg  binary=$bin"
+          test "$pkg" = "$bin"
