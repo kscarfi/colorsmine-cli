@@ -132,8 +132,11 @@ jobs:
           # dark:true tightens the gate — light is S, dark is not
           [ "${{ steps.darkgate.outcome }}" = "failure" ] || fail "dark gate should have failed at --min S"
 
-          # a broken palette fails the step
+          # a broken palette fails the step — and still reports, because the
+          # script now survives its own non-zero check
           [ "${{ steps.shouldfail.outcome }}" = "failure" ] || fail "broken palette should fail"
+          [ "${{ steps.shouldfail.outputs.grade }}" = "D" ] || fail "failed step should still publish outputs, got '${{ steps.shouldfail.outputs.grade }}'"
+          [ "${{ steps.darkgate.outputs.grade }}" = "S" ] || fail "dark gate: light grade should still be S, got '${{ steps.darkgate.outputs.grade }}'"
 
           # ...and with the gate off it succeeds and still reports the grade,
           # which is the only shape in which a failing palette can be commented

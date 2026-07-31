@@ -73,7 +73,11 @@ runs:
         CM_VERSION: ${{ inputs.version }}
         CM_FAIL: ${{ inputs.fail-on-error }}
       run: |
+        # GitHub runs composite `run:` blocks with `bash -e`, and a failing
+        # palette is an expected exit 1 — without this the script died on the
+        # check itself and never reached the step that writes the outputs.
         set -uo pipefail
+        set +e
 
         args=(check --min "$CM_MIN")
         [ "$CM_WCAG" = "true" ] && args+=(--wcag)
