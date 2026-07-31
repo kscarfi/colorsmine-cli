@@ -2,7 +2,8 @@ import { resolve } from 'node:path'
 import { ratePalette, suggestFix, type Grade, type PaletteRating } from './engine/paletteRating'
 import type { Token } from './color'
 import { discover, readAll } from './discover'
-import { selectPalette } from './select'
+import { selectPalette, type RoleOverrides } from './select'
+import { loadConfig } from './config'
 import { makeStyle, render } from './report'
 import { splitColors, toHex } from './color'
 
@@ -29,6 +30,9 @@ ColorsMine — fail your build when your palette isn't accessible.
     --wcag           Fail if any intended pairing misses its WCAG minimum,
                      whatever the grade says
     --dark           Apply --min and --wcag to dark mode too
+    --role <r>=<tok> Pin a role to a token: --role muted=--text-dim
+                     (roles: surface, card, muted, primary, accent, text)
+    --config <path>  Read settings from this file instead of discovering one
     --colors <list>  Grade these hexes instead of reading files
     --json           Machine-readable output
     --badge          Print the README badge markdown and exit
@@ -40,6 +44,12 @@ ColorsMine — fail your build when your palette isn't accessible.
     0  palette meets the minimum
     1  palette is below the minimum
     2  nothing could be read
+
+  Config
+    colorsmine.json, .colorsmine.json, or a "colorsmine" key in package.json:
+      { "files": ["src/globals.css"], "min": "B", "wcag": true,
+        "roles": { "muted": "--text-dim", "card": "--bg-raised" } }
+    Flags win over the file.
 
   Docs: https://colorsmine.com/rate
 `
@@ -54,12 +64,16 @@ interface Args {
   badge: boolean
   color: boolean
   colors: string[]
+  roles: RoleOverrides
+  config?: string
+  minSet: boolean
 }
 
 function parseArgs(argv: string[]): Args | { error: string } {
   const a: Args = {
     cmd: '', files: [], min: 'B', wcag: false, dark: false, json: false, badge: false,
     color: process.stdout.isTTY === true && !process.env.NO_COLOR, colors: [],
+    roles: {}, minSet: false,
   }
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]
@@ -67,10 +81,25 @@ function parseArgs(argv: string[]): Args | { error: string } {
       const v = (argv[++i] ?? '').toUpperCase()
       if (!ORDER.includes(v as Grade)) return { error: `--min expects one of S, A, B, C, D — got ${argv[i] ?? '(nothing)'}` }
       a.min = v as Grade
+      a.minSet = true
     } else if (arg.startsWith('--min=')) {
       const v = arg.slice(6).toUpperCase()
       if (!ORDER.includes(v as Grade)) return { error: `--min expects one of S, A, B, C, D — got ${arg.slice(6)}` }
       a.min = v as Grade
+      a.minSet = true
+    } else if (arg === '--role') {
+      const v = argv[++i]
+      const m = /^([a-z]+)=(.+)$/i.exec(v ?? '')
+      if (!m) return { error: `--role expects <role>=<token>, e.g. --role muted=--text-dim` }
+      const ROLES = ['surface', 'card', 'muted', 'primary', 'accent', 'text']
+      if (!ROLES.includes(m[1].toLowerCase())) {
+        return { error: `"${m[1]}" is not a role — expected one of ${ROLES.join(', ')}` }
+      }
+      a.roles[m[1].toLowerCase()] = m[2]
+    } else if (arg === '--config') {
+      const v = argv[++i]
+      if (!v) return { error: '--config expects a path' }
+      a.config = v
     } else if (arg === '--colors') {
       const v = argv[++i]
       if (!v) return { error: '--colors expects a list of colors' }
@@ -114,6 +143,20 @@ async function main() {
   const s = makeStyle(args.color)
   const cwd = process.cwd()
 
+  // Flags win over the file: a one-off `--min S` should not require editing
+  // the repo's settings, and CI overrides are the common case.
+  let cfg
+  try {
+    cfg = loadConfig(cwd, args.config)
+  } catch (e) {
+    process.stderr.write(`colorsmine: ${(e as Error).message}\n`)
+    process.exit(2)
+  }
+  const roleOverrides: RoleOverrides = { ...cfg.config.roles, ...args.roles }
+  if (!args.minSet && cfg.config.min) args.min = cfg.config.min as Grade
+  if (cfg.config.wcag) args.wcag = args.wcag || cfg.config.wcag
+  if (cfg.config.dark) args.dark = args.dark || cfg.config.dark
+
   // --colors skips the file layer entirely, which is what CI matrix jobs and
   // "is this one pairing OK" questions actually want.
   let hexes: string[]
@@ -130,10 +173,16 @@ async function main() {
       process.exit(2)
     }
     hexes = args.colors.map(c => toHex(c)!)
-    selection = { hexes, picks: hexes.map(h => ({ role: '—', token: { name: h, hex: h, source: '--colors' } })), named: true }
+    selection = {
+      hexes,
+      picks: hexes.map(h => ({ role: '—', token: { name: h, hex: h, source: '--colors' }, pinned: false })),
+      named: true, missing: [], ungraded: [], pinned: {},
+    }
     files = ['--colors']
   } else {
-    const targets = args.files.length ? args.files.map(f => resolve(cwd, f)) : discover(cwd)
+    const fromConfig = cfg.config.files ?? []
+    const named = args.files.length ? args.files : fromConfig
+    const targets = named.length ? named.map(f => resolve(cwd, f)) : discover(cwd)
     if (!targets.length) {
       process.stderr.write(
         'colorsmine: no token file found.\n\n' +
@@ -152,18 +201,26 @@ async function main() {
       )
       process.exit(2)
     }
-    selection = selectPalette(read.tokens)
+    selection = selectPalette(read.tokens, roleOverrides)
+    // A pin that matches nothing is a typo the user needs told about, not a
+    // setting to quietly discard.
+    for (const [role, token] of Object.entries(roleOverrides)) {
+      if (!selection.picks.some(p => p.role === role && p.pinned)) {
+        notes.push(`role "${role}" pinned to ${token}, which is not a color token in these files`)
+      }
+    }
+    if (cfg.from) files.push(`(${cfg.from})`)
     hexes = selection.hexes
     darkTokens = read.darkTokens
     lightTokens = read.tokens
   }
 
-  const rating = ratePalette(hexes)
+  const rating = ratePalette(hexes, { roles: selection.pinned })
   if (!rating) {
     process.stderr.write(`colorsmine: need at least two distinct colors to grade — found ${hexes.length}.\n`)
     process.exit(2)
   }
-  const fix = suggestFix(hexes)
+  const fix = suggestFix(hexes, { roles: selection.pinned })
 
   // `rating.dark` is the engine's model of dark mode: the same colors with the
   // roles flipped. That is the right answer when all you have is a palette —
@@ -175,7 +232,7 @@ async function main() {
   if (darkTokens.length) {
     const overridden = new Set(darkTokens.map(t => t.name))
     const merged = [...lightTokens.filter(t => !overridden.has(t.name)), ...darkTokens]
-    const declared = ratePalette(selectPalette(merged).hexes)
+    const declared = ratePalette(selectPalette(merged, roleOverrides).hexes)
     if (declared) {
       dark = { grade: declared.grade, overall: declared.overall, pairings: declared.pairings, declared: true }
     }
@@ -223,11 +280,20 @@ async function main() {
           files,
           notes,
           namedSelection: selection.named,
+          config: cfg.from,
+          // What the grade did and did not cover, so a consumer can tell a
+          // clean bill of health from a partial reading.
+          coverage: {
+            rolesFound: selection.picks.map(p => p.role),
+            rolesMissing: selection.missing,
+            pinned: Object.keys(selection.pinned),
+            ungraded: selection.ungraded.map(t => ({ token: t.name, hex: t.hex, source: t.source })),
+          },
           // `matchedAs` is why the token was picked out of the file; `roles` is
           // what the engine then decided it does. They can disagree, and the
           // engine's reading is the one the grade is built on.
           palette: selection.picks.map(p => ({
-            matchedAs: p.role, token: p.token.name, hex: p.token.hex, source: p.token.source,
+            matchedAs: p.role, token: p.token.name, hex: p.token.hex, source: p.token.source, pinned: p.pinned,
           })),
           roles: rating.roles,
           grade: rating.grade,

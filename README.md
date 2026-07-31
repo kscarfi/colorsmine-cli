@@ -122,6 +122,55 @@ the file, **and says so**. Whatever it picks is printed next to the token it
 came from and the job the engine gave it — a grade you can't trace back to a
 line in your own repo is a number to argue with, not a result to act on.
 
+### When it doesn't recognise your names
+
+No heuristic anticipates every convention. A system that writes `bg-raised`
+for a card and `text-dim` for muted text matches none of the patterns above,
+and those two colors drop out of the palette — which makes the grade go **up**,
+because the pairings that would have failed were never built.
+
+So the check reports what it did not cover:
+
+```
+  ! no token matched the roles: card, muted
+    this grade covers 3 pairings; a complete palette implies more
+    ungraded colors in these files:
+      --bg-raised  #F4F5F7
+      --text-dim   #8B93A1
+    pin one with --role card=<token>, or put it in colorsmine.json
+```
+
+Pinning a role settles it:
+
+```bash
+npx colorsmine check --role card=--bg-raised --role muted=--text-dim
+```
+
+That file goes from a confident `S 94` covering three pairings to `A 87`
+covering five — with the muted text at 3.09:1, which is the answer.
+
+## Config
+
+Settings belong in the repo, not in a workflow file. `colorsmine.json`,
+`.colorsmine.json`, or a `colorsmine` key in `package.json`:
+
+```json
+{
+  "files": ["src/globals.css"],
+  "min": "B",
+  "wcag": true,
+  "dark": false,
+  "roles": {
+    "card": "--bg-raised",
+    "muted": "--text-dim"
+  }
+}
+```
+
+Flags win over the file, so `--min S` still works for a one-off. An unknown
+key or an invalid value is an error rather than a silent default — a gate that
+quietly ignores its own settings has stopped being a gate.
+
 ## Options
 
 ```
@@ -129,6 +178,9 @@ line in your own repo is a number to argue with, not a result to act on.
 --wcag           Fail if any intended pairing misses its WCAG minimum,
                  whatever the grade says
 --dark           Apply --min and --wcag to dark mode too
+--role <r>=<tok> Pin a role to a token, e.g. --role muted=--text-dim
+                 (roles: surface, card, muted, primary, accent, text)
+--config <path>  Read settings from this file instead of discovering one
 --colors <list>  Grade these colors instead of reading files
 --json           Machine-readable output
 --badge          Print the README badge markdown

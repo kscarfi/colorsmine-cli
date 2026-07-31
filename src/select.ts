@@ -3,9 +3,15 @@ import { coords, distance, type Token } from './color'
 export interface Selection {
   hexes: string[]
   /** What each chosen color was chosen as, in the order of `hexes`. */
-  picks: { role: string; token: Token }[]
+  picks: { role: string; token: Token; pinned: boolean }[]
   /** True when names carried the selection; false when it fell back to spread. */
   named: boolean
+  /** Roles no distinct token could be found for — the actionable gap. */
+  missing: string[]
+  /** Colors in the file that no role claimed, as pinning candidates. */
+  ungraded: Token[]
+  /** Roles the caller pinned, as hexes, for the engine to honour. */
+  pinned: Record<string, string>
 }
 
 /**
@@ -73,12 +79,37 @@ function best(matches: Token[], r: Role): Token {
   })[0]
 }
 
-export function selectPalette(tokens: Token[]): Selection {
-  const picks: { role: string; token: Token }[] = []
+/**
+ * A token file can name its roles in ways no heuristic anticipates —
+ * `bg-raised` for a card, `text-dim` for muted text. When that happens the
+ * colors are silently dropped and the grade covers a smaller palette than the
+ * one that shipped, which reads as a better palette rather than a partial
+ * reading. Overrides are how a project says what its own names mean.
+ */
+export type RoleOverrides = Record<string, string>
+
+export function selectPalette(tokens: Token[], overrides: RoleOverrides = {}): Selection {
+  const picks: { role: string; token: Token; pinned: boolean }[] = []
   const usedHex = new Set<string>()
   const usedName = new Set<string>()
+  const missing: string[] = []
+  const pinnedHexes: Record<string, string> = {}
+
+  // Pins first, so an override can claim a token before the heuristic spends
+  // it on another role.
+  for (const r of ROLES) {
+    const want = overrides[r.role]
+    if (!want) continue
+    const token = tokens.find(t => t.name === want || t.name === `--${want}` || t.name.replace(/^--/, '') === want)
+    if (!token) continue
+    picks.push({ role: r.role, token, pinned: true })
+    pinnedHexes[r.role] = token.hex
+    usedHex.add(token.hex)
+    usedName.add(token.name)
+  }
 
   for (const r of ROLES) {
+    if (picks.some(p => p.role === r.role)) continue
     let matches = tokens.filter(
       t => r.test.test(t.name) && !(r.not && r.not.test(t.name)) && !usedName.has(t.name) && !usedHex.has(t.hex),
     )
@@ -94,17 +125,32 @@ export function selectPalette(tokens: Token[]): Selection {
         if (usable.length) matches = usable
       }
     }
-    if (!matches.length) continue
+    if (!matches.length) {
+      // `accent` is genuinely optional; the other five are what a screen needs.
+      if (r.role !== 'accent') missing.push(r.role)
+      continue
+    }
     const token = best(matches, r)
-    picks.push({ role: r.role, token })
+    picks.push({ role: r.role, token, pinned: false })
     usedHex.add(token.hex)
     usedName.add(token.name)
   }
 
+  const ungraded = tokens.filter(t => !usedName.has(t.name) && !usedHex.has(t.hex))
+
   // Two named colors is not a palette; below that the names are telling us less
   // than the colors themselves would.
   if (picks.length >= 3) {
-    return { hexes: picks.map(p => p.token.hex), picks, named: true }
+    // Order follows lightness so the strip reads light → dark like the report.
+    picks.sort((a, b) => coords(b.token.hex).l - coords(a.token.hex).l)
+    return {
+      hexes: picks.map(p => p.token.hex),
+      picks,
+      named: true,
+      missing,
+      ungraded,
+      pinned: pinnedHexes,
+    }
   }
   return spread(tokens)
 }
@@ -115,7 +161,11 @@ function spread(tokens: Token[]): Selection {
   for (const t of tokens) if (!byHex.has(t.hex)) byHex.set(t.hex, t)
   const uniq = [...byHex.values()]
   if (uniq.length <= 5) {
-    return { hexes: uniq.map(t => t.hex), picks: uniq.map(t => ({ role: '—', token: t })), named: false }
+    return {
+      hexes: uniq.map(t => t.hex),
+      picks: uniq.map(t => ({ role: '—', token: t, pinned: false })),
+      named: false, missing: [], ungraded: [], pinned: {},
+    }
   }
 
   const sorted = [...uniq].sort((a, b) => coords(b.hex).l - coords(a.hex).l)
@@ -132,5 +182,12 @@ function spread(tokens: Token[]): Selection {
     chosen.push(bestT)
   }
   const ordered = chosen.sort((a, b) => coords(b.hex).l - coords(a.hex).l)
-  return { hexes: ordered.map(t => t.hex), picks: ordered.map(t => ({ role: '—', token: t })), named: false }
+  return {
+    hexes: ordered.map(t => t.hex),
+    picks: ordered.map(t => ({ role: '—', token: t, pinned: false })),
+    named: false,
+    missing: [],
+    ungraded: uniq.filter(t => !ordered.some(o => o.hex === t.hex)),
+    pinned: {},
+  }
 }

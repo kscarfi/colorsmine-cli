@@ -5,6 +5,8 @@ import { readJson } from '../readers/json'
 import { readTailwind } from '../readers/tailwind'
 import { selectPalette } from '../select'
 import { readAll } from '../discover'
+import { loadConfig } from '../config'
+import { ratePalette } from '../engine/paletteRating'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -306,5 +308,90 @@ describe('directory arguments', () => {
     const r = await readAll([join(root, 'empty')], root)
     expect(r.tokens).toHaveLength(0)
     expect(r.notes.join(' ')).toMatch(/no token file/)
+  })
+})
+
+describe('role overrides and coverage', () => {
+  // A real convention no heuristic anticipates: `bg-raised` for a card,
+  // `text-dim` for muted text. Before overrides this file graded S 94 with
+  // three pairings, because the two colors that would have failed were never
+  // selected — a partial reading scores higher than a complete one.
+  const tokens = [
+    { name: '--bg', hex: '#ffffff', source: 't.css' },
+    { name: '--bg-raised', hex: '#f4f5f7', source: 't.css' },
+    { name: '--text-dim', hex: '#8b93a1', source: 't.css' },
+    { name: '--brand', hex: '#2563eb', source: 't.css' },
+    { name: '--ink', hex: '#0f1729', source: 't.css' },
+  ]
+
+  it('reports the roles it could not fill', () => {
+    const sel = selectPalette(tokens)
+    expect(sel.missing).toEqual(expect.arrayContaining(['card', 'muted']))
+    expect(sel.ungraded.map(t => t.name)).toEqual(expect.arrayContaining(['--bg-raised', '--text-dim']))
+  })
+
+  it('honours a pin and stops reporting that role as missing', () => {
+    const sel = selectPalette(tokens, { card: '--bg-raised', muted: '--text-dim' })
+    expect(sel.missing).toEqual([])
+    expect(sel.hexes).toHaveLength(5)
+    expect(sel.pinned).toEqual({ card: '#f4f5f7', muted: '#8b93a1' })
+    expect(sel.picks.filter(p => p.pinned).map(p => p.role).sort()).toEqual(['card', 'muted'])
+  })
+
+  it('accepts a token name with or without the leading dashes', () => {
+    expect(selectPalette(tokens, { muted: 'text-dim' }).pinned.muted).toBe('#8b93a1')
+    expect(selectPalette(tokens, { muted: '--text-dim' }).pinned.muted).toBe('#8b93a1')
+  })
+
+  it('lets a pin claim a token the heuristic would have spent elsewhere', () => {
+    // `--ink` matches the text pattern; pinning it as muted must win.
+    const sel = selectPalette(tokens, { muted: '--ink' })
+    expect(sel.pinned.muted).toBe('#0f1729')
+    expect(sel.picks.find(p => p.role === 'text')?.token.name).not.toBe('--ink')
+  })
+
+  it('turns a partial reading into the grade it deserves', () => {
+    const partial = ratePalette(selectPalette(tokens).hexes)!
+    const full = (() => {
+      const sel = selectPalette(tokens, { card: '--bg-raised', muted: '--text-dim' })
+      return ratePalette(sel.hexes, { roles: sel.pinned })!
+    })()
+    expect(partial.pairings).toHaveLength(3)
+    expect(full.pairings).toHaveLength(5)
+    // the partial reading scored *better* — that is the whole problem
+    expect(partial.overall).toBeGreaterThan(full.overall)
+    expect(full.pairings.find(p => p.label === 'Muted text on surface')!.passes).toBe(false)
+  })
+})
+
+describe('config file', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cm-cfg-'))
+  const write = (name: string, body: unknown) =>
+    writeFileSync(join(dir, name), typeof body === 'string' ? body : JSON.stringify(body))
+
+  it('reads settings and role pins', () => {
+    write('colorsmine.json', { files: ['a.css'], min: 'a', wcag: true, roles: { muted: '--text-dim' } })
+    const { config, from } = loadConfig(dir)
+    expect(from).toBe('colorsmine.json')
+    expect(config).toEqual({ files: ['a.css'], min: 'A', wcag: true, roles: { muted: '--text-dim' } })
+  })
+
+  it('refuses what it cannot honour instead of ignoring it', () => {
+    // Silently dropping a typo'd setting is how a gate stops gating.
+    write('colorsmine.json', { minimum: 'B' })
+    expect(() => loadConfig(dir)).toThrow(/unknown option "minimum"/)
+    write('colorsmine.json', { min: 'Z' })
+    expect(() => loadConfig(dir)).toThrow(/one of S, A, B, C, D/)
+    write('colorsmine.json', { roles: { backgruond: '--bg' } })
+    expect(() => loadConfig(dir)).toThrow(/is not a role/)
+    write('colorsmine.json', { files: 'a.css' })
+    expect(() => loadConfig(dir)).toThrow(/must be an array/)
+    write('colorsmine.json', '{oops')
+    expect(() => loadConfig(dir)).toThrow(/not valid JSON/)
+  })
+
+  it('finds nothing without complaining when there is nothing', () => {
+    const empty = mkdtempSync(join(tmpdir(), 'cm-none-'))
+    expect(loadConfig(empty)).toEqual({ config: {}, from: null })
   })
 })

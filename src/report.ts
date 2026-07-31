@@ -88,11 +88,13 @@ export function render(opts: {
     role: (roleOf.get(p.token.hex.toLowerCase()) ?? []).join(', ') || '—',
     token: p.token.name.slice(strip.length),
     hex: p.token.hex.toUpperCase(),
+    pinned: p.pinned,
   }))
   const roleW = Math.max(...rows.map(r => r.role.length))
   const tokenW = Math.max(...rows.map(r => r.token.length))
   for (const r of rows) {
-    out.push(`    ${s.bold(pad(r.role, roleW))}  ${s.dim(pad(r.token, tokenW))}  ${r.hex}`)
+    const mark = r.pinned ? s.dim(' ·pinned') : ''
+    out.push(`    ${s.bold(pad(r.role, roleW))}  ${s.dim(pad(r.token, tokenW))}  ${r.hex}${mark}`)
   }
   out.push('')
 
@@ -163,6 +165,27 @@ export function render(opts: {
       `    ${s.dim(`${fix.gradeBefore} ${fix.overallBefore} → `)}${s.grade(fix.gradeAfter, fix.gradeAfter)} ` +
         s.bold(String(fix.overallAfter)),
     )
+    out.push('')
+  }
+
+  // A grade that covered three roles out of five is not the same claim as a
+  // grade that covered all of them, and the headline score cannot tell them
+  // apart on its own. The palette above says so quietly; this says it loudly,
+  // because a partial reading scores *higher* — the pairings it never built
+  // are the ones that would have failed.
+  if (selection.named && selection.missing.length) {
+    const roles = selection.missing.join(', ')
+    out.push(`  ${s.bad('!')} ${s.bold(`no token matched ${selection.missing.length === 1 ? 'the role' : 'the roles'}: ${roles}`)}`)
+    out.push(`    ${s.dim(`this grade covers ${rating.pairings.length} pairing${rating.pairings.length === 1 ? '' : 's'}; a complete palette implies more`)}`)
+    if (selection.ungraded.length) {
+      const shown = selection.ungraded.slice(0, 6)
+      out.push(`    ${s.dim('ungraded colors in these files:')}`)
+      for (const t of shown) out.push(`      ${s.chip(t.hex)}${s.dim(`${t.name}  ${t.hex.toUpperCase()}`)}`)
+      if (selection.ungraded.length > shown.length) {
+        out.push(`      ${s.dim(`…and ${selection.ungraded.length - shown.length} more`)}`)
+      }
+    }
+    out.push(`    ${s.dim(`pin one with --role ${selection.missing[0]}=<token>, or put it in colorsmine.json`)}`)
     out.push('')
   }
 

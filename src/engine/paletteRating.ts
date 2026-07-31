@@ -192,7 +192,17 @@ function buildPairings(roles: PaletteRoles): Pairing[] {
   return out
 }
 
-export function ratePalette(hexes: string[]): PaletteRating | null {
+/**
+ * Roles the caller already knows, because it read them from named tokens or a
+ * designer pinned them. Inference is a good guess about an anonymous list of
+ * colors; it is only a guess, and when the caller has better information it
+ * should win. Anything left out is still inferred.
+ */
+export interface RateOptions {
+  roles?: Partial<PaletteRoles>
+}
+
+export function ratePalette(hexes: string[], opts: RateOptions = {}): PaletteRating | null {
   if (hexes.length < 2) return null
   const okls = hexes.map(toOkl)
   if (okls.some(o => o === null)) return null
@@ -211,7 +221,14 @@ export function ratePalette(hexes: string[]): PaletteRating | null {
   aaPairs.sort((a, b) => b.ratio - a.ratio)
 
   // ── 1. Contrast: the pairings this palette actually implies ──────────────
-  const roles = inferRoles(hexes, O)
+  // Only roles whose color is actually in the palette can be honoured — a
+  // pinned token that was filtered out earlier would build a pairing against
+  // a color nothing else was scored against.
+  const present = new Set(hexes.map(h => h.toLowerCase()))
+  const pinned = Object.fromEntries(
+    Object.entries(opts.roles ?? {}).filter(([, hex]) => typeof hex === 'string' && present.has(hex.toLowerCase())),
+  ) as Partial<PaletteRoles>
+  const roles: PaletteRoles = { ...inferRoles(hexes, O), ...pinned }
   const pairings = buildPairings(roles)
   const passed = pairings.filter(p => p.passes).length
   const contrastScore = pairings.length ? passed / pairings.length : 0
@@ -346,8 +363,19 @@ export function ratePalette(hexes: string[]): PaletteRating | null {
  * grade — or, failing that, the one that buys the most points per unit of
  * change. Deterministic, so the advice is the same every time it is asked.
  */
-export function suggestFix(hexes: string[]): PaletteFix | null {
-  const before = ratePalette(hexes)
+/** Follow pinned roles through a color change. */
+function remapRoles(opts: RateOptions, from: string, to: string): RateOptions {
+  if (!opts.roles) return opts
+  const roles: Record<string, string> = {}
+  for (const [role, hex] of Object.entries(opts.roles)) {
+    if (typeof hex !== 'string') continue
+    roles[role] = hex.toLowerCase() === from.toLowerCase() ? to : hex
+  }
+  return { roles: roles as Partial<PaletteRoles> }
+}
+
+export function suggestFix(hexes: string[], opts: RateOptions = {}): PaletteFix | null {
+  const before = ratePalette(hexes, opts)
   if (!before || before.overall >= 97) return null
 
   const STEPS = 24          // ±0.48 lightness, in 0.02 increments
@@ -365,7 +393,10 @@ export function suggestFix(hexes: string[]): PaletteFix | null {
         if (!moved || moved.toLowerCase() === hexes[i].toLowerCase()) continue
         const candidate = [...hexes]
         candidate[i] = moved
-        const after = ratePalette(candidate)
+        // A pinned role points at a hex. Moving that hex would leave the
+        // pin dangling, the candidate would fall back to inference, and the
+        // before/after comparison would be between two different rulesets.
+        const after = ratePalette(candidate, remapRoles(opts, hexes[i], moved))
         if (!after || after.overall <= before.overall) continue
 
         const gain = after.overall - before.overall
