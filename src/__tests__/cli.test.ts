@@ -334,19 +334,21 @@ describe('role overrides and coverage', () => {
     const sel = selectPalette(tokens, { card: '--bg-raised', muted: '--text-dim' })
     expect(sel.missing).toEqual([])
     expect(sel.hexes).toHaveLength(5)
-    expect(sel.pinned).toEqual({ card: '#f4f5f7', muted: '#8b93a1' })
+    // `roles` is everything the names resolved, which is what the engine is
+    // told; `picks[].pinned` is the narrower question of what a person chose.
+    expect(sel.roles).toMatchObject({ card: '#f4f5f7', muted: '#8b93a1' })
     expect(sel.picks.filter(p => p.pinned).map(p => p.role).sort()).toEqual(['card', 'muted'])
   })
 
   it('accepts a token name with or without the leading dashes', () => {
-    expect(selectPalette(tokens, { muted: 'text-dim' }).pinned.muted).toBe('#8b93a1')
-    expect(selectPalette(tokens, { muted: '--text-dim' }).pinned.muted).toBe('#8b93a1')
+    expect(selectPalette(tokens, { muted: 'text-dim' }).roles.muted).toBe('#8b93a1')
+    expect(selectPalette(tokens, { muted: '--text-dim' }).roles.muted).toBe('#8b93a1')
   })
 
   it('lets a pin claim a token the heuristic would have spent elsewhere', () => {
     // `--ink` matches the text pattern; pinning it as muted must win.
     const sel = selectPalette(tokens, { muted: '--ink' })
-    expect(sel.pinned.muted).toBe('#0f1729')
+    expect(sel.roles.muted).toBe('#0f1729')
     expect(sel.picks.find(p => p.role === 'text')?.token.name).not.toBe('--ink')
   })
 
@@ -354,7 +356,7 @@ describe('role overrides and coverage', () => {
     const partial = ratePalette(selectPalette(tokens).hexes)!
     const full = (() => {
       const sel = selectPalette(tokens, { card: '--bg-raised', muted: '--text-dim' })
-      return ratePalette(sel.hexes, { roles: sel.pinned })!
+      return ratePalette(sel.hexes, { roles: sel.roles })!
     })()
     expect(partial.pairings).toHaveLength(3)
     expect(full.pairings).toHaveLength(5)
@@ -393,5 +395,43 @@ describe('config file', () => {
   it('finds nothing without complaining when there is nothing', () => {
     const empty = mkdtempSync(join(tmpdir(), 'cm-none-'))
     expect(loadConfig(empty)).toEqual({ config: {}, from: null })
+  })
+})
+
+describe('a theme is graded in the direction it was written', () => {
+  const light = { name: '--background', hex: '#ffffff', source: 't.css' }
+  const dark = [
+    { name: '--background', hex: '#0a0a0a', source: 't.css' },
+    { name: '--card', hex: '#171717', source: 't.css' },
+    { name: '--muted-foreground', hex: '#3f3f46', source: 't.css' },
+    { name: '--primary', hex: '#1e3a8a', source: 't.css' },
+    { name: '--foreground', hex: '#fafafa', source: 't.css' },
+  ]
+
+  it('trusts the names over the lightness', () => {
+    // Inference reads the lightest color as the surface. For a dark theme that
+    // is exactly backwards: it grades an inverted light theme, and this set
+    // came back A 85 with nothing failing while its muted text sits at 1.9:1.
+    const sel = selectPalette(dark)
+    expect(sel.roles.surface).toBe('#0a0a0a')
+    expect(sel.roles.text).toBe('#fafafa')
+
+    const guessed = ratePalette(sel.hexes)!
+    const told = ratePalette(sel.hexes, { roles: sel.roles })!
+    expect(guessed.roles.surface).toBe('#fafafa')      // the old, wrong reading
+    expect(guessed.pairings.every(p => p.passes)).toBe(true)
+
+    expect(told.roles.surface).toBe('#0a0a0a')
+    const failing = told.pairings.filter(p => !p.passes)
+    expect(failing.map(p => p.label)).toEqual(
+      expect.arrayContaining(['Muted text on surface', 'Primary against surface']),
+    )
+    expect(told.overall).toBeLessThan(guessed.overall)
+  })
+
+  it('still infers when there is nothing to trust', () => {
+    // Colors with no names — from --colors — must keep the old behaviour.
+    const sel = selectPalette([light])
+    expect(sel.roles).toEqual({})
   })
 })

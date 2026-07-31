@@ -176,7 +176,7 @@ async function main() {
     selection = {
       hexes,
       picks: hexes.map(h => ({ role: '—', token: { name: h, hex: h, source: '--colors' }, pinned: false })),
-      named: true, missing: [], ungraded: [], pinned: {},
+      named: true, missing: [], ungraded: [], roles: {},
     }
     files = ['--colors']
   } else {
@@ -215,12 +215,12 @@ async function main() {
     lightTokens = read.tokens
   }
 
-  const rating = ratePalette(hexes, { roles: selection.pinned })
+  const rating = ratePalette(hexes, { roles: selection.roles })
   if (!rating) {
     process.stderr.write(`colorsmine: need at least two distinct colors to grade — found ${hexes.length}.\n`)
     process.exit(2)
   }
-  const fix = suggestFix(hexes, { roles: selection.pinned })
+  const fix = suggestFix(hexes, { roles: selection.roles })
 
   // `rating.dark` is the engine's model of dark mode: the same colors with the
   // roles flipped. That is the right answer when all you have is a palette —
@@ -232,7 +232,11 @@ async function main() {
   if (darkTokens.length) {
     const overridden = new Set(darkTokens.map(t => t.name))
     const merged = [...lightTokens.filter(t => !overridden.has(t.name)), ...darkTokens]
-    const declared = ratePalette(selectPalette(merged, roleOverrides).hexes)
+    // The dark set has to be graded by its own names too. Inference reads the
+    // lightest color as the surface, which is exactly backwards for a dark
+    // theme — it graded an inverted light theme and passed it.
+    const darkSel = selectPalette(merged, roleOverrides)
+    const declared = ratePalette(darkSel.hexes, { roles: darkSel.roles })
     if (declared) {
       dark = { grade: declared.grade, overall: declared.overall, pairings: declared.pairings, declared: true }
     }
@@ -286,7 +290,7 @@ async function main() {
           coverage: {
             rolesFound: selection.picks.map(p => p.role),
             rolesMissing: selection.missing,
-            pinned: Object.keys(selection.pinned),
+            pinned: selection.picks.filter(p => p.pinned).map(p => p.role),
             ungraded: selection.ungraded.map(t => ({ token: t.name, hex: t.hex, source: t.source })),
           },
           // `matchedAs` is why the token was picked out of the file; `roles` is
