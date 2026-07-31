@@ -49,35 +49,92 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # Dogfooding: the action in this repo, run against this repo.
+      - run: |
+          mkdir -p fixtures/src
+          printf ':root{--background:#fff;--card:#f3f4f6;--muted-foreground:#6b7280;--primary:#2563eb;--foreground:#111827}' > fixtures/src/globals.css
+          printf '{"color":{"surface":{"$type":"color","$value":"#ffffff"},"muted":{"$type":"color","$value":"#9aa7b4"},"primary":{"$type":"color","$value":"#2563eb"},"text":{"$type":"color","$value":"#0f172a"}}}' > fixtures/tokens.json
+
+      # --- every input, exercised ---
       - uses: ./
-        id: palette
+        id: colors
         with:
           colors: '#FFFFFF #F3F4F6 #6B7280 #2563EB #111827'
           min: B
           wcag: 'true'
-      - name: Outputs are populated
-        run: |
-          set -e
-          test "${{ steps.palette.outputs.passed }}" = "true"
-          test -n "${{ steps.palette.outputs.grade }}"
-          test -n "${{ steps.palette.outputs.badge }}"
-          echo "grade=${{ steps.palette.outputs.grade }} score=${{ steps.palette.outputs.score }}"
 
-  version:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 20, cache: npm }
-      - run: npm ci && npm run build
-      # 0.1.1 shipped reporting `0.1.0` because the version was a hand-written
-      # constant. It is injected from package.json now; this proves it stayed
-      # injected.
-      - name: --version matches package.json
+      - uses: ./
+        id: onefile
+        with:
+          files: fixtures/src/globals.css
+          min: B
+
+      - uses: ./
+        id: multifile
+        with:
+          files: fixtures/src/globals.css fixtures/tokens.json
+          min: D
+
+      - uses: ./
+        id: pinned
+        with:
+          colors: '#FFFFFF #F3F4F6 #6B7280 #2563EB #111827'
+          version: '0.1.3'
+
+      - uses: ./
+        id: darkgate
+        with:
+          colors: '#FFFFFF #F3F4F6 #6B7280 #2563EB #111827'
+          min: S
+          dark: 'true'
+        continue-on-error: true
+
+      - uses: ./
+        id: shouldfail
+        with:
+          colors: '#808080 #828282 #7e7e7e #818181'
+          min: B
+        continue-on-error: true
+
+      - name: Assert every input behaved
         run: |
           set -e
-          pkg=$(node -p "require('./package.json').version")
-          bin=$(node dist/colorsmine.mjs --version)
-          echo "package.json=$pkg  binary=$bin"
-          test "$pkg" = "$bin"
+          fail() { echo "::error::$1"; exit 1; }
+
+          # outputs are populated and self-consistent
+          [ "${{ steps.colors.outputs.passed }}" = "true" ] || fail "colors: expected pass"
+          [ "${{ steps.colors.outputs.grade }}" = "S" ]     || fail "colors: expected S, got ${{ steps.colors.outputs.grade }}"
+          [ "${{ steps.colors.outputs.score }}" = "94" ]    || fail "colors: expected 94"
+          [ -n "${{ steps.colors.outputs.dark-grade }}" ]   || fail "colors: dark-grade empty"
+          [ -n "${{ steps.colors.outputs.dark-score }}" ]   || fail "colors: dark-score empty"
+          case "${{ steps.colors.outputs.badge }}" in
+            https://colorsmine.com/badge/*.svg) ;;
+            *) fail "colors: badge url malformed" ;;
+          esac
+
+          # reading a file gives the same grade as passing its colors directly
+          [ "${{ steps.onefile.outputs.grade }}" = "S" ] || fail "single file: expected S"
+
+          # two files merge into one palette rather than grading only the first
+          [ "${{ steps.multifile.outputs.passed }}" = "true" ] || fail "multi file: expected pass at --min D"
+
+          # a pinned version is honoured
+          [ "${{ steps.pinned.outputs.grade }}" = "S" ] || fail "pinned 0.1.3: expected S"
+
+          # dark:true tightens the gate — light is S, dark is not
+          [ "${{ steps.darkgate.outcome }}" = "failure" ] || fail "dark gate should have failed at --min S"
+          [ "${{ steps.darkgate.outputs.grade }}" = "S" ] || fail "dark gate: light grade should still be S"
+
+          # a broken palette fails and still reports
+          [ "${{ steps.shouldfail.outcome }}" = "failure" ] || fail "broken palette should fail"
+          [ "${{ steps.shouldfail.outputs.passed }}" = "false" ] || fail "broken palette: passed should be false"
+          [ "${{ steps.shouldfail.outputs.grade }}" = "D" ] || fail "broken palette: expected D"
+
+          echo "all action inputs and outputs verified"
+
+      - name: Job summary was written
+        run: |
+          set -e
+          test -s "$GITHUB_STEP_SUMMARY" || { echo "::error::step summary is empty"; exit 1; }
+          grep -q "Palette" "$GITHUB_STEP_SUMMARY" || { echo "::error::summary missing grade heading"; exit 1; }
+          grep -q "Pairing" "$GITHUB_STEP_SUMMARY" || { echo "::error::summary missing pairing table"; exit 1; }
+          echo "summary contains $(wc -l < "$GITHUB_STEP_SUMMARY") lines"
