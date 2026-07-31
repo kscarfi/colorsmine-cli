@@ -286,7 +286,7 @@ nothing downstream is.
 
 ## Supported platforms
 
-Node 18, 20 and 22 on Linux, macOS and Windows — every combination is in CI,
+Node 18, 20, 22 and 24 on Linux, macOS and Windows — every combination is in CI,
 and the GitHub Action is exercised on all three runners.
 
 MIT · built for [ColorsMine](https://colorsmine.com)
