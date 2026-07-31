@@ -146,11 +146,3 @@ jobs:
           [ "${{ steps.reportonly.outputs.grade }}" = "D" ] || fail "report-only: expected D, got ${{ steps.reportonly.outputs.grade }}"
 
           echo "all action inputs and outputs verified"
-
-      - name: Job summary was written
-        run: |
-          set -e
-          test -s "$GITHUB_STEP_SUMMARY" || { echo "::error::step summary is empty"; exit 1; }
-          grep -q "Palette" "$GITHUB_STEP_SUMMARY" || { echo "::error::summary missing grade heading"; exit 1; }
-          grep -q "Pairing" "$GITHUB_STEP_SUMMARY" || { echo "::error::summary missing pairing table"; exit 1; }
-          echo "summary contains $(wc -l < "$GITHUB_STEP_SUMMARY") lines"

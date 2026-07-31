@@ -194,9 +194,10 @@ Use them to gate a deploy, comment on a PR, or publish the badge:
 
 ### Reporting instead of blocking
 
-GitHub does not publish the outputs of a failed action, so a workflow that
-wants to *comment* a grade rather than block on it has to turn the gate off and
-decide for itself:
+Outputs are published whether the gate passes or not, so a failing palette can
+still be reported. What `fail-on-error: false` changes is the step's own
+result: the check stays green and the verdict moves into `passed`, for
+workflows that want to comment a grade rather than block a merge.
 
 ```yaml
 - uses: kscarfi/colorsmine-cli@v1
