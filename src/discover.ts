@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { existsSync, statSync } from 'node:fs'
-import { resolve, relative, extname, basename } from 'node:path'
+import { resolve, relative, extname, basename, sep } from 'node:path'
 import type { Token } from './color'
 import { readCss } from './readers/css'
 import { readJson } from './readers/json'
@@ -25,6 +25,14 @@ const CANDIDATES = [
   'app/styles/globals.css',
 ]
 
+/**
+ * Paths are reported with forward slashes on every platform. `relative()`
+ * hands back `src\\globals.css` on Windows, which would make the JSON output
+ * — and any annotation or issue someone pastes it into — depend on the OS that
+ * happened to run the check. Git, npm and CI logs all speak forward slashes.
+ */
+const posix = (p: string) => p.split(sep).join('/')
+
 export interface ReadResult {
   tokens: Token[]
   darkTokens: Token[]
@@ -44,7 +52,7 @@ export async function readAll(files: string[], cwd: string): Promise<ReadResult>
 
   for (const file of files) {
     if (!existsSync(file)) {
-      notes.push(`${relative(cwd, file)}: no such file`)
+      notes.push(`${posix(relative(cwd, file))}: no such file`)
       continue
     }
     // `colorsmine check src/` is a reasonable thing to type. Look for the
@@ -61,7 +69,7 @@ export async function readAll(files: string[], cwd: string): Promise<ReadResult>
         .map(n => resolve(file, n))
         .filter(p => existsSync(p) && !statSync(p).isDirectory())
       if (!inside.length) {
-        notes.push(`${relative(cwd, file) || '.'}: a directory with no token file in it`)
+        notes.push(`${posix(relative(cwd, file)) || '.'}: a directory with no token file in it`)
         continue
       }
       const nested = await readAll(inside, cwd)
@@ -72,7 +80,7 @@ export async function readAll(files: string[], cwd: string): Promise<ReadResult>
       continue
     }
     const text = await readFile(file, 'utf8')
-    const source = relative(cwd, file) || basename(file)
+    const source = posix(relative(cwd, file)) || basename(file)
     const ext = extname(file)
 
     if (ext === '.css') {

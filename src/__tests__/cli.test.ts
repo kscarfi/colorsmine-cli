@@ -290,6 +290,8 @@ describe('directory arguments', () => {
   mkdirSync(join(root, 'empty'))
 
   it('looks inside a directory by file name', async () => {
+    // Forward slashes on every platform — Windows reported src\\globals.css,
+    // which made the JSON output depend on the OS that ran the check.
     const r = await readAll([join(root, 'src')], root)
     expect(r.files).toEqual(['src/globals.css'])
     expect(r.tokens).toHaveLength(2)
