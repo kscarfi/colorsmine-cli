@@ -153,6 +153,10 @@ runs:
           exit 2
         fi
 
+        # Only the step that owns $GITHUB_STEP_SUMMARY can read it back, so
+        # this line is the one place the write can be observed at all.
+        echo "Wrote $(wc -c < "$GITHUB_STEP_SUMMARY" | tr -d ' ') bytes to the job summary."
+
         # Outputs are published either way; this only changes the step's own
         # result, for workflows that want a green check and the verdict in a
         # variable rather than a blocked merge.
