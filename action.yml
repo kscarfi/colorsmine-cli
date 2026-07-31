@@ -77,15 +77,30 @@ runs:
           args+=("${extra[@]}")
         fi
 
+        # Install the requested version explicitly instead of leaning on npx.
+        # `npx --yes colorsmine@<version>` resolved to a bare `colorsmine` on
+        # PATH once the name had been seen before and exited 127 — the version
+        # input was silently unusable. A prefix install is deterministic, keeps
+        # node_modules out of the checkout, and resolves once for both runs.
+        BIN_DIR="$RUNNER_TEMP/colorsmine-bin"
+        npm install --prefix "$BIN_DIR" --no-save --no-audit --no-fund --loglevel=error \
+          "colorsmine@$CM_VERSION"
+        BIN="$BIN_DIR/node_modules/.bin/colorsmine"
+        if [ ! -x "$BIN" ]; then
+          echo "::error title=ColorsMine::could not install colorsmine@$CM_VERSION"
+          exit 2
+        fi
+        echo "colorsmine $("$BIN" --version) (requested: $CM_VERSION)"
+
         # The log gets the human report; the outputs and the job summary come
         # from the same run's JSON, so they can never disagree.
-        npx --yes "colorsmine@$CM_VERSION" "${args[@]}" --json > "$RUNNER_TEMP/colorsmine.json"
+        "$BIN" "${args[@]}" --json > "$RUNNER_TEMP/colorsmine.json"
         code=$?
         if [ ! -s "$RUNNER_TEMP/colorsmine.json" ]; then
           echo "::error title=ColorsMine::could not read any palette — see the log above"
           exit 2
         fi
-        FORCE_COLOR=1 npx --yes "colorsmine@$CM_VERSION" "${args[@]}" --color || true
+        FORCE_COLOR=1 "$BIN" "${args[@]}" --color || true
 
         node -e '
           const fs = require("fs")
