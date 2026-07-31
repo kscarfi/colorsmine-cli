@@ -33,9 +33,8 @@ inputs:
   fail-on-error:
     description: >-
       Fail the step when the palette misses the gate (default). Set to 'false'
-      to always succeed and decide yourself from the `passed` output — GitHub
-      does not propagate the outputs of a failed action, so a workflow that
-      wants to comment the grade on the PR needs this off.
+      to always succeed and decide yourself from the `passed` output, for
+      workflows that report a grade rather than block a merge.
     required: false
     default: 'true'
 
@@ -148,8 +147,15 @@ runs:
           sum.write(`\n[Full report](https://colorsmine.com/rate/${r.badge.split("/").pop().replace(".svg","")})\n`)
           sum.end()
         '
-        # A failed composite action publishes no outputs, so `fail-on-error:
-        # false` is the only way a workflow can report a grade it did not pass.
+        report=$?
+        if [ $report -ne 0 ]; then
+          echo "::error title=ColorsMine::colorsmine@$CM_VERSION produced a report this action could not read (exit $report). The output format may have changed — pin the \`version\` input or update the action."
+          exit 2
+        fi
+
+        # Outputs are published either way; this only changes the step's own
+        # result, for workflows that want a green check and the verdict in a
+        # variable rather than a blocked merge.
         if [ "$CM_FAIL" = "false" ]; then
           exit 0
         fi
