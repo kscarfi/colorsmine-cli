@@ -7,7 +7,10 @@ branding:
 
 inputs:
   files:
-    description: Token files to grade, space separated. Leave empty to auto-discover.
+    description: >-
+      Token files to grade. One per line, which is the only form that survives
+      a path with a space in it; a single line may also be space separated.
+      Leave empty to auto-discover.
     required: false
     default: ''
   colors:
@@ -84,9 +87,19 @@ runs:
         if [ -n "$CM_COLORS" ]; then
           args+=(--colors "$CM_COLORS")
         elif [ -n "$CM_FILES" ]; then
-          # shellcheck disable=SC2206
-          extra=($CM_FILES)
-          args+=("${extra[@]}")
+          # One path per line keeps `my design/tokens.css` in one piece; word
+          # splitting a single line stays supported because that is what the
+          # input used to mean.
+          if [ "$CM_FILES" != "${CM_FILES%%$'\n'*}" ]; then
+            while IFS= read -r line; do
+              line="$(printf '%s' "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+              [ -n "$line" ] && args+=("$line")
+            done <<< "$CM_FILES"
+          else
+            # shellcheck disable=SC2206
+            extra=($CM_FILES)
+            args+=("${extra[@]}")
+          fi
         fi
 
         # Install the requested version explicitly instead of leaning on npx.

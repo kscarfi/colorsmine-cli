@@ -91,6 +91,19 @@ jobs:
           files: fixtures/src/globals.css fixtures/tokens.json
           min: D
 
+      # A path with a space in it word-splits into two missing files unless the
+      # input is given one per line.
+      - run: |
+          mkdir -p "fixtures/my design/src"
+          cp fixtures/src/globals.css "fixtures/my design/src/globals.css"
+      - uses: ./
+        id: spacedpath
+        with:
+          files: |
+            fixtures/my design/src/globals.css
+            fixtures/tokens.json
+          min: D
+
       - uses: ./
         id: pinned
         with:
@@ -162,4 +175,38 @@ jobs:
           [ "${{ steps.reportonly.outputs.passed }}" = "false" ] || fail "report-only: passed should be false"
           [ "${{ steps.reportonly.outputs.grade }}" = "D" ] || fail "report-only: expected D, got ${{ steps.reportonly.outputs.grade }}"
 
+          # a path with a space survives the line-separated form
+          [ "${{ steps.spacedpath.outputs.passed }}" = "true" ] || fail "spaced path: expected pass"
+
           echo "all action inputs and outputs verified"
+
+      # The action swallows every non-zero exit so it can survive the check's
+      # own; the one thing it must still notice is a report it cannot read.
+      - name: An unreadable report stops the action
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          set -e
+          python3 - <<'EXTRACT' > /tmp/report.sh
+          src = open('action.yml').read()
+          i = src.index("node -e '")
+          j = src.index("\n        '", i)
+          block = src[i:j] + "\n'"
+          print('\n'.join(l[8:] if l.startswith(' ' * 8) else l for l in block.split('\n')))
+          EXTRACT
+          export GITHUB_OUTPUT=/tmp/o.txt GITHUB_STEP_SUMMARY=/tmp/s.md
+          : > /tmp/o.txt; : > /tmp/s.md
+
+          # a report with a renamed field is what a future CLI release looks like
+          node -e "
+            const fs=require('fs');
+            const j=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+'/colorsmine.json','utf8'));
+            delete j.dark;
+            fs.writeFileSync('/tmp/broken.json', JSON.stringify(j));
+          "
+          RUNNER_TEMP=/tmp cp /tmp/broken.json /tmp/colorsmine.json
+          if RUNNER_TEMP=/tmp bash /tmp/report.sh 2>/dev/null; then
+            echo "::error::the report step accepted a report it cannot read"
+            exit 1
+          fi
+          test ! -s /tmp/o.txt || { echo "::error::broken report still wrote outputs"; exit 1; }
+          echo "unreadable report is rejected, and writes nothing"
