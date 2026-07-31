@@ -30,6 +30,14 @@ inputs:
     description: Version of the colorsmine package to run.
     required: false
     default: 'latest'
+  fail-on-error:
+    description: >-
+      Fail the step when the palette misses the gate (default). Set to 'false'
+      to always succeed and decide yourself from the `passed` output — GitHub
+      does not propagate the outputs of a failed action, so a workflow that
+      wants to comment the grade on the PR needs this off.
+    required: false
+    default: 'true'
 
 outputs:
   passed:
@@ -63,6 +71,7 @@ runs:
         CM_WCAG: ${{ inputs.wcag }}
         CM_DARK: ${{ inputs.dark }}
         CM_VERSION: ${{ inputs.version }}
+        CM_FAIL: ${{ inputs.fail-on-error }}
       run: |
         set -uo pipefail
 
@@ -135,4 +144,9 @@ runs:
           sum.write(`\n[Full report](https://colorsmine.com/rate/${r.badge.split("/").pop().replace(".svg","")})\n`)
           sum.end()
         '
+        # A failed composite action publishes no outputs, so `fail-on-error:
+        # false` is the only way a workflow can report a grade it did not pass.
+        if [ "$CM_FAIL" = "false" ]; then
+          exit 0
+        fi
         exit $code

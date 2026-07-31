@@ -192,6 +192,24 @@ Use them to gate a deploy, comment on a PR, or publish the badge:
 - run: echo "Palette scored ${{ steps.palette.outputs.grade }}"
 ```
 
+### Reporting instead of blocking
+
+GitHub does not publish the outputs of a failed action, so a workflow that
+wants to *comment* a grade rather than block on it has to turn the gate off and
+decide for itself:
+
+```yaml
+- uses: kscarfi/colorsmine-cli@v1
+  id: palette
+  with:
+    min: B
+    fail-on-error: 'false'
+- if: steps.palette.outputs.passed == 'false'
+  run: echo "Palette slipped to ${{ steps.palette.outputs.grade }}"
+```
+
+Inputs: `files`, `colors`, `min`, `wcag`, `dark`, `version`, `fail-on-error`.
+
 ## Badge
 
 ```bash

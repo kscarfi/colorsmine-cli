@@ -95,6 +95,15 @@ jobs:
           min: B
         continue-on-error: true
 
+      # GitHub drops the outputs of a failed action, so reporting a grade you
+      # did not pass is only possible with the gate turned off.
+      - uses: ./
+        id: reportonly
+        with:
+          colors: '#808080 #828282 #7e7e7e #818181'
+          min: B
+          fail-on-error: 'false'
+
       - name: Assert every input behaved
         run: |
           set -e
@@ -122,12 +131,16 @@ jobs:
 
           # dark:true tightens the gate — light is S, dark is not
           [ "${{ steps.darkgate.outcome }}" = "failure" ] || fail "dark gate should have failed at --min S"
-          [ "${{ steps.darkgate.outputs.grade }}" = "S" ] || fail "dark gate: light grade should still be S"
 
-          # a broken palette fails and still reports
+          # a broken palette fails the step
           [ "${{ steps.shouldfail.outcome }}" = "failure" ] || fail "broken palette should fail"
-          [ "${{ steps.shouldfail.outputs.passed }}" = "false" ] || fail "broken palette: passed should be false"
-          [ "${{ steps.shouldfail.outputs.grade }}" = "D" ] || fail "broken palette: expected D"
+
+          # ...and with the gate off it succeeds and still reports the grade,
+          # which is the only shape in which a failing palette can be commented
+          # on a PR — GitHub publishes no outputs for a failed action.
+          [ "${{ steps.reportonly.outcome }}" = "success" ] || fail "fail-on-error:false should not fail the step"
+          [ "${{ steps.reportonly.outputs.passed }}" = "false" ] || fail "report-only: passed should be false"
+          [ "${{ steps.reportonly.outputs.grade }}" = "D" ] || fail "report-only: expected D, got ${{ steps.reportonly.outputs.grade }}"
 
           echo "all action inputs and outputs verified"
 
