@@ -95,10 +95,15 @@ const ROLES: Role[] = [
   { role: 'accent', test: /(^|[-._/])(accent|highlight|link|info)([-._/]|$)/i, not: FOREGROUND, prefer: 'chroma' },
   // `--primary-foreground` is a label colour, not the body text; only a
   // foreground color with no other role in its name is the real ink.
+  //
+  // `on-` catches the whole convention at once — `text/on-danger` is the word
+  // printed on a red button, and grading it as the body ink says nothing about
+  // the page. Naming each state was leaving new ones out: `danger` was missing
+  // from this list while `destructive` was in it.
   {
     role: 'text',
     test: /(^|[-._/])(foreground|text|fg|ink|copy|content)([-._/]|$)/i,
-    not: /(muted|subtle|placeholder|hint|primary|brand|accent|secondary|tertiary|destructive|success|warning|error|info|card|popover|sidebar|inverse|invert)/i,
+    not: /([-._/]on-|muted|subtle|placeholder|hint|primary|brand|accent|secondary|tertiary|destructive|danger|critical|success|warning|error|info|card|popover|sidebar|inverse|invert)/i,
     prefer: 'dark',
   },
 ]

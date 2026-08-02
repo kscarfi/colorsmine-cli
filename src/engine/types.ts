@@ -5,7 +5,7 @@
 
 export type Role =
   | 'primary' | 'secondary' | 'accent' | 'surface' | 'text'
-  | 'border' | 'error' | 'warning' | 'success'
+  | 'border' | 'error' | 'warning' | 'success' | 'info'
 
 export interface ExtractedColor {
   hex: string
