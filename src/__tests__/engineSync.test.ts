@@ -4,7 +4,6 @@ import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-// @ts-expect-error — plain .mjs helper, no types
 import { bodyOf, vendoredBody } from '../../scripts/sync-engine.mjs'
 
 /**
