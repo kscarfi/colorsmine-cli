@@ -4,7 +4,6 @@ import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { bodyOf, vendoredBody } from '../../scripts/sync-engine.mjs'
 
 /**
  * src/engine/ is copied out of the ColorsMine app. The package promises that
@@ -19,13 +18,27 @@ import { bodyOf, vendoredBody } from '../../scripts/sync-engine.mjs'
  *   2. The app's engine moves and nobody re-synced. Only detectable with the
  *      app repo on disk, so that test skips when it isn't there rather than
  *      pretending the check ran.
+ *
+ * Both compare whole-file hashes the sync script recorded. An earlier version
+ * imported the script's transform helpers to recompute them, which meant this
+ * file reached across the vite root into a .mjs — fine on macOS and Linux,
+ * a load-time SyntaxError on Windows, where the externalised absolute path
+ * is not a valid ESM specifier. Hashes need no transform and no import.
  */
 
 const CLI_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const ENGINE_DIR = join(CLI_ROOT, 'src', 'engine')
-const manifest = JSON.parse(readFileSync(join(ENGINE_DIR, 'sync-manifest.json'), 'utf8'))
+
+interface Entry { source: string; upstream: string; vendored: string }
+const manifest: { files: Record<string, Entry> } = JSON.parse(
+  readFileSync(join(ENGINE_DIR, 'sync-manifest.json'), 'utf8'),
+)
+const files = Object.entries(manifest.files)
 
 const sha = (text: string) => createHash('sha256').update(text).digest('hex').slice(0, 16)
+
+/** Git may check these out with CRLF on Windows; the hashes were taken on LF. */
+const read = (path: string) => readFileSync(path, 'utf8').replace(/\r\n/g, '\n')
 
 function findApp(): string | null {
   const candidates = [
@@ -37,8 +50,6 @@ function findApp(): string | null {
   return null
 }
 
-const files = Object.entries(manifest.files) as [string, { source: string; upstream: string; vendored: string }][]
-
 describe('vendored engine', () => {
   it('covers every file the sync script owns', () => {
     expect(files.length).toBeGreaterThan(0)
@@ -46,17 +57,21 @@ describe('vendored engine', () => {
   })
 
   it.each(files)('%s has not been hand-edited since it was synced', (name, entry) => {
-    const body = bodyOf(readFileSync(join(ENGINE_DIR, name), 'utf8'))
-    expect(sha(body), `${name} differs from the copy recorded in sync-manifest.json — edit it in the app repo and re-run \`node scripts/sync-engine.mjs\`, don't patch it here`).toBe(entry.vendored)
+    expect(
+      sha(read(join(ENGINE_DIR, name))),
+      `${name} differs from the copy recorded in sync-manifest.json — edit it in the app repo and re-run \`node scripts/sync-engine.mjs\`, don't patch it here`,
+    ).toBe(entry.vendored)
   })
 
   const app = findApp()
   const withApp = app ? describe : describe.skip
 
   withApp('against the app repo', () => {
-    it.each(files)('%s matches the app source', (name, entry) => {
-      const upstream = readFileSync(join(app!, entry.source), 'utf8')
-      expect(sha(vendoredBody(upstream)), `${entry.source} has moved on — run \`node scripts/sync-engine.mjs\``).toBe(entry.vendored)
+    it.each(files)('%s matches the app source', (_name, entry) => {
+      expect(
+        sha(read(join(app!, entry.source))),
+        `${entry.source} has moved on — run \`node scripts/sync-engine.mjs\``,
+      ).toBe(entry.upstream)
     })
   })
 })

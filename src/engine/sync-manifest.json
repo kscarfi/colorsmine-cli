@@ -1,31 +1,30 @@
 {
-  "syncedFrom": "/Users/kscarfi/Desktop/ColorsMine",
-  "syncedAt": "2026-08-04T06:26:57.036Z",
+  "syncedAt": "2026-08-04T06:43:14.642Z",
   "files": {
     "paletteRating.ts": {
       "source": "src/lib/paletteRating.ts",
       "upstream": "37fe34ed3f677193",
-      "vendored": "37fe34ed3f677193"
+      "vendored": "455a0a5dc7eb711a"
     },
     "colorBlindness.ts": {
       "source": "src/lib/colorBlindness.ts",
       "upstream": "cf55283f581d8e78",
-      "vendored": "cf55283f581d8e78"
+      "vendored": "24b3b63db33abd6b"
     },
     "colorNaming.ts": {
       "source": "src/lib/colorNaming.ts",
       "upstream": "448840b4be6c4614",
-      "vendored": "79f2b42c6c1f4d83"
+      "vendored": "47d0d768e8ebae88"
     },
     "contrastValidator.ts": {
       "source": "src/lib/contrastValidator.ts",
       "upstream": "d382b4aa37f643a2",
-      "vendored": "6f6cfe2361e8ccb7"
+      "vendored": "33ebf0957cad4fd6"
     },
     "roleSelection.ts": {
       "source": "src/lib/roleSelection.ts",
       "upstream": "9a1d9ebc9a643db3",
-      "vendored": "9a1d9ebc9a643db3"
+      "vendored": "6971767204a6aa53"
     }
   }
 }

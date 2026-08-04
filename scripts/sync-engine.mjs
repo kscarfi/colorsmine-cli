@@ -51,15 +51,12 @@ const BANNER = name =>
   `// Editing this copy makes the CLI grade differently from colorsmine.com,\n` +
   `// which is the one thing this package promises cannot happen.\n\n`
 
-const sha = text => createHash('sha256').update(text).digest('hex').slice(0, 16)
-
-/** Vendored body with the banner stripped — what the drift test compares. */
-export function bodyOf(vendored) {
-  return vendored.replace(/^\/\/[^\n]*\n(?:\/\/[^\n]*\n)*\n/, '')
-}
+// Hashes are taken on LF so a sync run on Windows records the same values
+// the drift test computes there.
+const sha = text => createHash('sha256').update(text.replace(/\r\n/g, '\n')).digest('hex').slice(0, 16)
 
 /** Upstream source rewritten the way it is stored here. */
-export function vendoredBody(upstream) {
+function vendoredBody(upstream) {
   return IMPORT_REWRITES.reduce((text, [from, to]) => text.replace(from, to), upstream)
 }
 
@@ -82,7 +79,7 @@ async function main() {
   console.log(`app: ${app}\n`)
 
   await mkdir(ENGINE_DIR, { recursive: true })
-  const manifest = { syncedFrom: app, syncedAt: new Date().toISOString(), files: {} }
+  const manifest = { syncedAt: new Date().toISOString(), files: {} }
   let changed = 0
 
   for (const [name, sourcePath] of Object.entries(FILES)) {
@@ -93,8 +90,8 @@ async function main() {
     const current = existsSync(target) ? await readFile(target, 'utf8') : null
 
     if (current !== next) { await writeFile(target, next); changed++ }
-    manifest.files[name] = { source: sourcePath, upstream: sha(upstream), vendored: sha(body) }
-    console.log(`  ${current === next ? '=' : '↓'} ${name.padEnd(22)} ${sha(body)}`)
+    manifest.files[name] = { source: sourcePath, upstream: sha(upstream), vendored: sha(next) }
+    console.log(`  ${current === next ? '=' : '↓'} ${name.padEnd(22)} ${sha(next)}`)
   }
 
   await writeFile(MANIFEST, JSON.stringify(manifest, null, 2) + '\n')
@@ -102,4 +99,4 @@ async function main() {
   console.log('types.ts is hand-maintained and was not touched.')
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) main()
+main()
